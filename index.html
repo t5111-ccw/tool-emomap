@@ -324,7 +324,7 @@
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
     import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
-    import { getFirestore, doc, onSnapshot, setDoc } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+    import { getFirestore, doc, onSnapshot, setDoc, updateDoc, increment, arrayUnion } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
 
     // 1. 預設全地圖情緒詞資料
     const DEFAULT_EMOTIONS = [
@@ -399,6 +399,18 @@
       });
     });
 
+    function setSyncStatus(msg, isSuccess = true) {
+      const badge = document.getElementById('sync-status-badge');
+      if (!badge) return;
+      if (isSuccess) {
+        badge.className = "flex items-center gap-1.5 text-emerald-400 font-medium";
+        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> ${msg}`;
+      } else {
+        badge.className = "flex items-center gap-1.5 text-rose-400 font-medium animate-pulse";
+        badge.innerHTML = `<span class="w-2 h-2 rounded-full bg-rose-500 inline-block"></span> ${msg}`;
+      }
+    }
+
     async function initFirebase() {
       try {
         const firebaseConfig = {
@@ -414,52 +426,70 @@
         const auth = getAuth(app);
         db = getFirestore(app);
 
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        // 嘗試匿名登入
+        try {
           await signInAnonymously(auth);
-        } else {
-          await signInAnonymously(auth);
+        } catch (authErr) {
+          if (authErr.code === 'auth/operation-not-allowed') {
+            setSyncStatus("錯誤：未啟用 Firebase 匿名驗證！", false);
+            return;
+          }
+          throw authErr;
         }
 
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'tool-emomap-room-1';
-        roomDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'session_room');
+        // 使用獨立簡化的房間文件路徑
+        roomDocRef = doc(db, 'rooms', 'session_room');
 
+        // 即時監聽雲端資料變更
         onSnapshot(roomDocRef, (snapshot) => {
           if (snapshot.exists()) {
             const data = snapshot.data();
-            if (data.question !== undefined) window.appState.question = data.question;
-            if (data.votes !== undefined) window.appState.votes = data.votes;
-            if (data.customWords !== undefined) window.appState.customWords = data.customWords;
+            if (data.question !== undefined) {
+              window.appState.question = data.question;
+              const qInput = document.getElementById('question-input');
+              if (qInput && document.activeElement !== qInput) {
+                qInput.value = data.question;
+              }
+            }
+            if (data.votes !== undefined) {
+              window.appState.votes = { ...window.appState.votes, ...data.votes };
+            }
+            if (data.customWords !== undefined) {
+              window.appState.customWords = data.customWords;
+            }
             
-            document.getElementById('question-input').value = window.appState.question;
             renderMap();
             updateStats();
+            setSyncStatus("雲端即時同步中", true);
           } else {
-            syncToFirebase();
+            // 初始化雲端房間資料
+            setDoc(roomDocRef, {
+              question: window.appState.question,
+              votes: window.appState.votes,
+              customWords: window.appState.customWords,
+              updatedAt: new Date().toISOString()
+            });
+            setSyncStatus("房間建立完成，同步中", true);
           }
-        }, (err) => console.error("Firebase 監聽失敗:", err));
+        }, (err) => {
+          console.error("Firebase 監聽失敗:", err);
+          if (err.code === 'permission-denied') {
+            setSyncStatus("錯誤：Firestore 權限不足 (Rules)", false);
+          } else {
+            setSyncStatus("連線中斷", false);
+          }
+        });
 
-        document.getElementById('sync-status-badge').innerHTML = `
-          <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> 雲端即時連線中
-        `;
-        document.getElementById('sync-status-badge').className = "flex items-center gap-1.5 text-emerald-400";
       } catch (e) {
-        console.warn("無法連接 Firebase，使用 Memory 模式", e);
+        console.warn("無法連接 Firebase", e);
+        setSyncStatus("未連線 (單機模式)", false);
       }
-    }
-
-    function syncToFirebase() {
-      if (!roomDocRef) return;
-      setDoc(roomDocRef, {
-        question: window.appState.question,
-        votes: window.appState.votes,
-        customWords: window.appState.customWords,
-        updatedAt: new Date().toISOString()
-      }, { merge: true }).catch(err => console.error(err));
     }
 
     // 渲染互動地圖
     window.renderMap = function() {
       const layer = document.getElementById('emotions-layer');
+      if (!layer) return;
       layer.innerHTML = '';
 
       const allWords = [...DEFAULT_EMOTIONS, ...window.appState.customWords];
@@ -500,26 +530,42 @@
       });
     };
 
-    // 處理點擊投票 (上限限制 3 個)
-    function handleVote(wordId) {
-      if (window.appState.myVotes.has(wordId)) {
-        // 取消投票
-        window.appState.myVotes.delete(wordId);
-        window.appState.votes[wordId] = Math.max(0, (window.appState.votes[wordId] || 1) - 1);
-      } else {
-        // 檢查上限 3 個情緒
-        if (window.appState.myVotes.size >= 3) {
-          alert("最多只能選擇 3 個最主要的情緒喔！\n如需重新選擇，請先點擊已選的情緒進行取消。");
-          return;
-        }
-        // 進行投票
-        window.appState.myVotes.add(wordId);
-        window.appState.votes[wordId] = (window.appState.votes[wordId] || 0) + 1;
+    // 處理點擊投票 (採用原子增減 increment，避免競態覆蓋)
+    async function handleVote(wordId) {
+      const isCancel = window.appState.myVotes.has(wordId);
+
+      if (!isCancel && window.appState.myVotes.size >= 3) {
+        alert("最多只能選擇 3 個最主要的情緒喔！\n如需重新選擇，請先點擊已選的情緒進行取消。");
+        return;
       }
 
+      // 本地個人投票記錄切換
+      if (isCancel) {
+        window.appState.myVotes.delete(wordId);
+      } else {
+        window.appState.myVotes.add(wordId);
+      }
+
+      const delta = isCancel ? -1 : 1;
+
+      // 本地端即時渲染（提升流暢度）
+      window.appState.votes[wordId] = Math.max(0, (window.appState.votes[wordId] || 0) + delta);
       renderMap();
       updateStats();
-      syncToFirebase();
+
+      // 原子更新至雲端資料庫
+      if (roomDocRef) {
+        try {
+          await updateDoc(roomDocRef, {
+            [`votes.${wordId}`]: increment(delta)
+          });
+        } catch (e) {
+          // 若 Document 不存在則建立
+          await setDoc(roomDocRef, {
+            votes: window.appState.votes
+          }, { merge: true });
+        }
+      }
     }
 
     // 更新象限統計
@@ -543,23 +589,22 @@
     // 教師按鈕點擊處理
     window.toggleLoginModal = function() {
       if (window.appState.isTeacherLoggedIn) {
-        // 已登入狀態下點擊直接登出
         window.appState.isTeacherLoggedIn = false;
         applyTeacherState();
       } else {
-        // 未登入狀態下點擊，開啟登入彈窗
         document.getElementById('login-modal').classList.remove('hidden');
       }
     };
 
-    // 僅用於關閉彈窗
     window.closeLoginModalWindow = function() {
       document.getElementById('login-modal').classList.add('hidden');
     };
 
-    // 教師登入驗證 (僅需密碼 24567126)
+    // 教師登入驗證 (僅需要密碼 24567126)
     window.handleTeacherLogin = function() {
       const inputEl = document.getElementById('teacher-password-input');
+      if (!inputEl) return;
+      
       const pwd = inputEl.value.trim();
 
       if (pwd === '24567126') {
@@ -601,21 +646,28 @@
       }
     }
 
-    // 題目變更 (僅教師模式有效)
+    // 題目變更同步
     window.onQuestionChange = function() {
-      if (!window.appState.isTeacherLoggedIn) return;
+      if (!window.appState.isTeacherLoggedIn || !roomDocRef) return;
       window.appState.question = document.getElementById('question-input').value;
-      syncToFirebase();
+      updateDoc(roomDocRef, { question: window.appState.question }).catch(err => console.error(err));
     };
 
     // 重置所有投票
     window.resetVotes = function() {
       if (!confirm("確定要重置所有學生的情緒投票數據嗎？")) return;
-      Object.keys(window.appState.votes).forEach(k => { window.appState.votes[k] = 0; });
+      
+      const resetVotesMap = {};
+      Object.keys(window.appState.votes).forEach(k => { resetVotesMap[k] = 0; });
+      window.appState.votes = resetVotesMap;
       window.appState.myVotes.clear();
+
       renderMap();
       updateStats();
-      syncToFirebase();
+
+      if (roomDocRef) {
+        setDoc(roomDocRef, { votes: resetVotesMap }, { merge: true });
+      }
     };
 
     // 彈窗控制
@@ -628,7 +680,7 @@
     };
 
     // 提交學生自訂情緒詞
-    window.submitCustomWord = function() {
+    window.submitCustomWord = async function() {
       const title = document.getElementById('new-word-title').value.trim();
       const x = parseInt(document.getElementById('new-word-x').value);
       const y = parseInt(document.getElementById('new-word-y').value);
@@ -653,8 +705,7 @@
       };
 
       window.appState.customWords.push(newWord);
-      
-      // 檢查投票限制
+
       if (window.appState.myVotes.size < 3) {
         window.appState.votes[newWord.id] = 1;
         window.appState.myVotes.add(newWord.id);
@@ -665,10 +716,16 @@
 
       document.getElementById('new-word-title').value = '';
       toggleAddCustomWordModal();
-      
+
       renderMap();
       updateStats();
-      syncToFirebase();
+
+      if (roomDocRef) {
+        await updateDoc(roomDocRef, {
+          customWords: arrayUnion(newWord),
+          [`votes.${newWord.id}`]: window.appState.votes[newWord.id] || 0
+        }).catch(err => console.error(err));
+      }
     };
 
     // 匯出/同步到 Google Drive 備份格式導出
