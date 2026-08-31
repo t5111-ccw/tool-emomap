@@ -559,43 +559,21 @@
 
     // 教師登入驗證 (僅需密碼 24567126)
     window.handleTeacherLogin = function() {
-      const pwd = document.getElementById('teacher-password-input').value.trim();
+      const inputEl = document.getElementById('teacher-password-input');
+      const pwd = inputEl.value.trim();
 
       if (pwd === '24567126') {
         window.appState.isTeacherLoggedIn = true;
-        document.getElementById('teacher-password-input').value = '';
+        inputEl.value = '';
+        inputEl.placeholder = '請輸入密碼';
+        inputEl.classList.remove('border-rose-500');
         
         closeLoginModalWindow();
         applyTeacherState();
       } else {
-        const inputEl = document.getElementById('teacher-password-input');
         inputEl.value = '';
         inputEl.placeholder = '密碼錯誤，請重新輸入！';
         inputEl.classList.add('border-rose-500');
-      }
-    };
-
-    // 僅用於關閉彈窗
-    window.closeLoginModalWindow = function() {
-      document.getElementById('login-modal').classList.add('hidden');
-    };
-
-    // 教師登入驗證 (帳號 t5111 / 密碼 24567126)
-    window.handleTeacherLogin = function() {
-      const acc = document.getElementById('teacher-account-input').value.trim();
-      const pwd = document.getElementById('teacher-password-input').value.trim();
-
-      if (acc === 't5111' && pwd === '24567126') {
-        window.appState.isTeacherLoggedIn = true;
-        document.getElementById('teacher-account-input').value = '';
-        document.getElementById('teacher-password-input').value = '';
-        
-        // 修正：直接隱藏彈窗，不呼叫會觸發登出確認的 toggleLoginModal
-        closeLoginModalWindow();
-        applyTeacherState();
-        alert("登入成功！已解鎖教師管理權限。");
-      } else {
-        alert("帳號或密碼錯誤，請重新輸入！");
       }
     };
 
