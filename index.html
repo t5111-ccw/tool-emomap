@@ -115,7 +115,7 @@
         <!-- 老師專用控制項 (登入後顯示) -->
         <div id="teacher-controls" class="hidden flex items-center gap-2">
           <!-- 雲端匯出/備份至 Google Drive 關聯 -->
-          <button onclick="exportToDrive()" class="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5 transition" title="導出數據紀錄 (關聯 Google Drive 資料夾)">
+          <button id="btn-export" onclick="exportToDrive()" class="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5 transition" title="自動導出數據並同步至雲端">
             <i data-lucide="cloud-upload" class="w-3.5 h-3.5"></i> 匯出/雲端同步
           </button>
 
@@ -209,27 +209,33 @@
       </section>
 
       <!-- 四大象限數據比例統計 (老師登入後顯示) -->
-      <section id="quadrant-stats" class="hidden grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl text-center">
-          <div class="text-xs text-slate-400 mb-1">① 高強度/負面</div>
-          <div id="q1-count" class="text-xl font-extrabold text-rose-400">0 票 (0%)</div>
-        </div>
-        <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl text-center">
-          <div class="text-xs text-slate-400 mb-1">❷ 高強度/正面</div>
-          <div id="q2-count" class="text-xl font-extrabold text-amber-400">0 票 (0%)</div>
-        </div>
-        <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl text-center">
-          <div class="text-xs text-slate-400 mb-1">❸ 低強度/負面</div>
-          <div id="q3-count" class="text-xl font-extrabold text-blue-400">0 票 (0%)</div>
-        </div>
-        <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl text-center">
-          <div class="text-xs text-slate-400 mb-1">❹ 低強度/正面</div>
-          <div id="q4-count" class="text-xl font-extrabold text-emerald-400">0 票 (0%)</div>
-        </div>
-      </section>
-
+  <section id="quadrant-stats" class="hidden grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl text-center">
+      <div class="text-xs text-slate-400 mb-1">① 高強度/負面</div>
+      <div id="q1-count" class="text-xl font-extrabold text-rose-400">0 票 (0%)</div>
     </div>
-  </main>
+    <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl text-center">
+      <div class="text-xs text-slate-400 mb-1">❷ 高強度/正面</div>
+      <div id="q2-count" class="text-xl font-extrabold text-amber-400">0 票 (0%)</div>
+    </div>
+    <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl text-center">
+      <div class="text-xs text-slate-400 mb-1">❸ 低強度/負面</div>
+      <div id="q3-count" class="text-xl font-extrabold text-blue-400">0 票 (0%)</div>
+    </div>
+    <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl text-center">
+      <div class="text-xs text-slate-400 mb-1">❹ 低強度/正面</div>
+      <div id="q4-count" class="text-xl font-extrabold text-emerald-400">0 票 (0%)</div>
+    </div>
+  </section>
+
+</div>
+</main>
+
+  <!-- 自動同步提示 Toast (右下角非打擾式提示) -->
+  <div id="toast-notification" class="fixed bottom-5 right-5 bg-emerald-600 text-white text-xs font-bold px-4 py-3 rounded-xl shadow-2xl transition-all duration-300 opacity-0 translate-y-5 pointer-events-none z-50 flex items-center gap-2">
+    <i data-lucide="check-circle" class="w-4 h-4"></i>
+    <span id="toast-msg">已成功同步至雲端！</span>
+  </div>
 
   <!-- 彈窗 0: 教師登入彈窗 -->
   <div id="login-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
@@ -744,6 +750,85 @@
     window.toggleDriveModal = function() {
       const modal = document.getElementById('drive-modal');
       if (modal) modal.classList.toggle('hidden');
+    };
+
+    // 匯出 PNG 圖檔並自動同步至 Firebase 雲端資料庫
+    window.exportToDrive = async function() {
+      const exportTarget = document.getElementById('export-capture-area');
+      if (!exportTarget) return;
+
+      const btn = document.getElementById('btn-export');
+      const originalText = btn ? btn.innerHTML : '';
+      if (btn) btn.innerHTML = `<i data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i> 自動同步中...`;
+
+      try {
+        // 解決 html2canvas 裁切/變形 Bug：在 clone 複製階段強制為 1000px 桌面標準比例
+        const canvas = await html2canvas(exportTarget, {
+          backgroundColor: '#0f172a',
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          windowWidth: 1280,
+          onclone: (clonedDoc) => {
+            const clonedTarget = clonedDoc.getElementById('export-capture-area');
+            if (clonedTarget) {
+              clonedTarget.style.width = '1000px';
+              clonedTarget.style.maxWidth = '1000px';
+              clonedTarget.style.padding = '24px';
+              clonedTarget.style.margin = '0 auto';
+            }
+          }
+        });
+
+        const imageUri = canvas.toDataURL('image/png');
+        const fileName = `情緒地圖投票結果_${new Date().toISOString().slice(0,10)}_${Date.now().toString().slice(-4)}.png`;
+
+        // 1. 全自動寫入 Firebase 雲端快照集合 (完全不需任何手動動作)
+        if (db) {
+          const snapshotRef = doc(db, 'rooms', 'session_room', 'snapshots', `snap_${Date.now()}`);
+          await setDoc(snapshotRef, {
+            fileName: fileName,
+            question: window.appState.question,
+            votes: window.appState.votes,
+            imageUrl: imageUri,
+            createdAt: new Date().toISOString()
+          });
+        }
+
+        // 2. 本地端同時自動觸發下載圖檔備份
+        const link = document.createElement('a');
+        link.download = fileName;
+        link.href = imageUri;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        // 3. 跳出右下角自動同步成功提示
+        showToast("✅ 已成功匯出高畫質圖片，並自動同步儲存至雲端紀錄！");
+
+      } catch (err) {
+        console.error("PNG 生成/自動同步失敗:", err);
+        alert("自動同步失敗，請再試一次！");
+      } finally {
+        if (btn) btn.innerHTML = originalText;
+        if (window.lucide) lucide.createIcons();
+      }
+    };
+
+    // 顯示自動同步提示 Toast
+    window.showToast = function(msg) {
+      const toast = document.getElementById('toast-notification');
+      const toastMsg = document.getElementById('toast-msg');
+      if (!toast || !toastMsg) return;
+      
+      toastMsg.innerText = msg;
+      toast.classList.remove('opacity-0', 'translate-y-5', 'pointer-events-none');
+      toast.classList.add('opacity-100', 'translate-y-0');
+
+      setTimeout(() => {
+        toast.classList.remove('opacity-100', 'translate-y-0');
+        toast.classList.add('opacity-0', 'translate-y-5', 'pointer-events-none');
+      }, 3500);
     };
 
     function setupUI() {
