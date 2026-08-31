@@ -10,6 +10,8 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <!-- QRCode.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- html2canvas (高畫質 PNG 匯出) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <!-- Firebase SDKs -->
   <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js" type="module"></script>
   <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js" type="module"></script>
@@ -141,7 +143,7 @@
     </header>
 
     <!-- 主內容呈現區 -->
-    <div class="p-4 md:p-6 flex-1 flex flex-col gap-6 max-w-6xl w-full mx-auto">
+    <div id="export-capture-area" class="p-4 md:p-6 flex-1 flex flex-col gap-6 max-w-6xl w-full mx-auto">
 
       <!-- 問題/文本指示框 -->
       <section class="bg-slate-950 border border-slate-800 rounded-2xl p-4 shadow-xl">
@@ -255,67 +257,30 @@
     </div>
   </div>
 
-  <!-- 彈窗 1: QR Code 投影彈窗 -->
-  <div id="qrcode-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
-    <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-sm w-full text-center space-y-4 shadow-2xl relative">
-      <button onclick="toggleQRCodeModal()" class="absolute top-3 right-3 text-slate-400 hover:text-white">
+  <!-- 彈窗 3: 雲端資料夾同步與 PNG 下載提示彈窗 -->
+  <div id="drive-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-md w-full space-y-4 shadow-2xl relative text-center">
+      <button onclick="toggleDriveModal()" class="absolute top-3 right-3 text-slate-400 hover:text-white">
         <i data-lucide="x" class="w-5 h-5"></i>
       </button>
-      <h3 class="text-lg font-bold text-slate-100 flex items-center justify-center gap-2">
-        <i data-lucide="qr-code" class="text-indigo-400"></i> 學生手機掃碼連線
-      </h3>
-      <p class="text-xs text-slate-400">請學生使用手機相機掃描下方 QR Code 進入投票</p>
-      
-      <div class="bg-white p-4 rounded-xl inline-block mx-auto shadow-inner">
-        <div id="qrcode-target"></div>
+      <div class="w-12 h-12 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto border border-emerald-500/30">
+        <i data-lucide="image" class="w-6 h-6"></i>
       </div>
+      <h3 class="text-lg font-bold text-slate-100">PNG 高畫質圖檔已順利匯出！</h3>
+      <p class="text-xs text-slate-300 leading-relaxed">
+        系統已將討論主題、情緒熱力圖與四大象限統計匯出為：<br>
+        <span id="exported-filename" class="font-mono text-amber-300 font-semibold block my-1">情緒地圖投票結果.png</span>
+        您可點擊下方按鈕直接開啟指定 Google Drive 雲端資料夾備份。
+      </p>
 
-      <div class="text-xs text-slate-400 break-all bg-slate-950 p-2 rounded border border-slate-800">
-        <span id="share-url-text">http://localhost</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- 彈窗 2: 學生自訂情緒詞雲彈窗 -->
-  <div id="custom-word-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
-    <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-md w-full space-y-4 shadow-2xl relative">
-      <button onclick="toggleAddCustomWordModal()" class="absolute top-3 right-3 text-slate-400 hover:text-white">
-        <i data-lucide="x" class="w-5 h-5"></i>
-      </button>
-      <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2">
-        <i data-lucide="plus-circle" class="text-indigo-400"></i> 新增自訂情緒詞彙 (詞雲)
-      </h3>
-      <p class="text-xs text-slate-400">找不到你想表達的情緒？輸入新詞彙並指定它的象限感受！</p>
-      
-      <div class="space-y-3 pt-2">
-        <div>
-          <label class="block text-xs font-semibold text-slate-300 mb-1">情緒詞名稱：</label>
-          <input type="text" id="new-word-title" placeholder="例如：驚喜、心酸、小確幸..." maxlength="6"
-            class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500">
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-300 mb-1">正面 / 負面 (好壞感受)：</label>
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-slate-400">負面</span>
-            <input type="range" id="new-word-x" min="-85" max="85" value="0" class="w-full accent-indigo-500">
-            <span class="text-xs text-slate-400">正面</span>
-          </div>
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-300 mb-1">高強度 / 低強度 (激動平靜)：</label>
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-slate-400">低強度</span>
-            <input type="range" id="new-word-y" min="-85" max="85" value="0" class="w-full accent-indigo-500">
-            <span class="text-xs text-slate-400">高強度</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="flex justify-end gap-2 pt-2">
-        <button onclick="toggleAddCustomWordModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-300">取消</button>
-        <button onclick="submitCustomWord()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold">新增並選擇</button>
+      <div class="pt-2 flex flex-col gap-2">
+        <a id="drive-folder-link" href="https://drive.google.com/drive/folders/1oI4GPpRotu2UwwD1TZ6NE51lA8LZkXFW" target="_blank"
+          class="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-lg">
+          <i data-lucide="external-link" class="w-4 h-4"></i> 前往 Google Drive 資料夾上傳
+        </a>
+        <button onclick="toggleDriveModal()" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium">
+          關閉
+        </button>
       </div>
     </div>
   </div>
@@ -728,29 +693,57 @@
       }
     };
 
-    // 匯出/同步到 Google Drive 備份格式導出
-    window.exportToDrive = function() {
-      const allWords = [...DEFAULT_EMOTIONS, ...window.appState.customWords];
-      let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
-      csvContent += `討論主題,"${window.appState.question.replace(/"/g, '""')}"\n`;
-      csvContent += `匯出時間,"${new Date().toLocaleString()}"\n`;
-      csvContent += `指定 Google Drive 資料夾 ID,"${DRIVE_FOLDER_ID}"\n\n`;
-      csvContent += "情緒詞,象限,X座標,Y座標,得票數\n";
+    // 匯出 PNG 圖檔並引導同步至 Google Drive 雲端資料夾
+    window.exportToDrive = async function() {
+      const exportTarget = document.getElementById('export-capture-area');
+      if (!exportTarget) return;
 
-      allWords.forEach(w => {
-        const count = window.appState.votes[w.id] || 0;
-        csvContent += `"${w.name}",象限${w.quadrant},${w.x},${w.y},${count}\n`;
-      });
+      const btn = document.querySelector('button[onclick="exportToDrive()"]');
+      const originalText = btn ? btn.innerHTML : '';
+      if (btn) btn.innerHTML = `<i data-lucide="loader" class="w-3.5 h-3.5 animate-spin"></i> 圖片生成中...`;
 
-      const encodedUri = encodeURI(csvContent);
-      const link = document.createElement("a");
-      link.setAttribute("href", encodedUri);
-      link.setAttribute("download", `情緒地圖投票紀錄_${new Date().toISOString().slice(0,10)}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      try {
+        // 使用 html2canvas 擷取情緒地圖與統計資訊畫面 (雙倍解析度 Scale: 2)
+        const canvas = await html2canvas(exportTarget, {
+          backgroundColor: '#0f172a',
+          scale: 2,
+          useCORS: true,
+          logging: false
+        });
 
-      alert(`已將投票統計資料匯出為 CSV 檔案！\n可直接上傳至您的指定 Google Drive 資料夾：\n${DRIVE_FOLDER_ID}`);
+        const imageUri = canvas.toDataURL('image/png');
+        const fileName = `情緒地圖投票結果_${new Date().toISOString().slice(0,10)}.png`;
+
+        // 觸發 PNG 下載
+        const link = document.createElement('a');
+        link.download = fileName;
+        link.href = imageUri;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        // 彈出對話框提示並提供 Google Drive 直達連結
+        showDriveModal(fileName);
+
+      } catch (err) {
+        console.error("PNG 生成失敗:", err);
+        alert("圖片匯出失敗，請再試一次！");
+      } finally {
+        if (btn) btn.innerHTML = originalText;
+        if (window.lucide) lucide.createIcons();
+      }
+    };
+
+    window.showDriveModal = function(fileName) {
+      const nameEl = document.getElementById('exported-filename');
+      if (nameEl) nameEl.innerText = fileName;
+      const modal = document.getElementById('drive-modal');
+      if (modal) modal.classList.remove('hidden');
+    };
+
+    window.toggleDriveModal = function() {
+      const modal = document.getElementById('drive-modal');
+      if (modal) modal.classList.toggle('hidden');
     };
 
     function setupUI() {
