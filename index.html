@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>教學工具百寶箱 - 互動情緒地圖投票系統</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- QRCode.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js" type="module"></script>
+  <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js" type="module"></script>
+  <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js" type="module"></script>
+
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+    body {
+      font-family: 'Noto Sans TC', sans-serif;
+    }
+    
+    /* 情緒地圖熱力特效 */
+    .emotion-node {
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      user-select: none;
+    }
+    .emotion-node:hover {
+      transform: scale(1.12);
+      z-index: 30;
+    }
+    
+    /* 熱力光暈效果 */
+    .heat-glow {
+      box-shadow: 0 0 15px rgba(239, 68, 68, 0.6), 0 0 30px rgba(239, 68, 68, 0.4);
+    }
+    
+    .pulse-animation {
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col md:flex-row overflow-x-hidden">
+
+  <!-- 左側：工具百寶箱側邊欄 -->
+  <aside class="w-full md:w-64 bg-slate-950 border-r border-slate-800 flex flex-col justify-between shrink-0">
+    <div>
+      <!-- 標題 -->
+      <div class="p-4 border-b border-slate-800 flex items-center gap-3">
+        <div class="p-2 bg-indigo-600 rounded-lg text-white">
+          <i data-lucide="box"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-lg text-slate-100">數位工具百寶箱</h1>
+          <p class="text-xs text-indigo-400 font-medium">仲騏老師製作</p>
+        </div>
+      </div>
+
+      <!-- 工具選單 -->
+      <nav class="p-3 space-y-1">
+        <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg bg-indigo-600/20 text-indigo-400 font-medium text-sm border border-indigo-500/30">
+          <i data-lucide="heart-handshake" class="w-4 h-4"></i>
+          <span>情緒地圖投票</span>
+        </button>
+        
+        <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-500 hover:bg-slate-900 hover:text-slate-300 transition text-sm cursor-not-allowed opacity-60" title="即將推出">
+          <i data-lucide="timer" class="w-4 h-4"></i>
+          <span>倒數計時器 (預留)</span>
+        </button>
+        
+        <button class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-500 hover:bg-slate-900 hover:text-slate-300 transition text-sm cursor-not-allowed opacity-60" title="即將推出">
+          <i data-lucide="dices" class="w-4 h-4"></i>
+          <span>隨機抽籤 (預留)</span>
+        </button>
+      </nav>
+    </div>
+
+    <!-- 底部資訊與設定 -->
+    <div class="p-4 border-t border-slate-800 text-xs text-slate-500 space-y-2">
+      <div class="flex justify-between items-center">
+        <span>連線狀態:</span>
+        <span id="sync-status-badge" class="flex items-center gap-1.5 text-amber-400">
+          <span class="w-2 h-2 rounded-full bg-amber-400 inline-block pulse-animation"></span>
+          單機體驗/未連線
+        </span>
+      </div>
+      <div class="text-[11px] text-slate-600 truncate">
+        Drive ID: 1oI4GPpRotu2UwwD...
+      </div>
+    </div>
+  </aside>
+
+  <!-- 右側：主要工作區域 -->
+  <main class="flex-1 flex flex-col min-h-screen bg-slate-900 overflow-y-auto">
+
+    <!-- 頂部功能控制列 -->
+    <header class="bg-slate-950/80 backdrop-blur border-b border-slate-800 p-4 sticky top-0 z-40 flex flex-wrap items-center justify-between gap-4">
+      <!-- 標題提示 -->
+      <div class="flex items-center gap-2">
+        <span class="bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 text-xs px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1.5">
+          <i data-lucide="heart-handshake" class="w-3.5 h-3.5"></i> 情緒地圖互動投票
+        </span>
+      </div>
+
+      <!-- 操作按鈕群 -->
+      <div class="flex items-center gap-2 flex-wrap">
+        <!-- 老師專用控制項 (登入後顯示) -->
+        <div id="teacher-controls" class="hidden flex items-center gap-2">
+          <!-- 雲端匯出/備份至 Google Drive 關聯 -->
+          <button onclick="exportToDrive()" class="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5 transition" title="導出數據紀錄 (關聯 Google Drive 資料夾)">
+            <i data-lucide="cloud-upload" class="w-3.5 h-3.5"></i> 匯出/雲端同步
+          </button>
+
+          <!-- 重置投票數據 (老師端) -->
+          <button onclick="resetVotes()" class="px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600/30 text-rose-400 border border-rose-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5 transition">
+            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> 重置投票
+          </button>
+        </div>
+
+        <!-- QR Code 投影鈕 -->
+        <button onclick="toggleQRCodeModal()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium flex items-center gap-1.5 transition">
+          <i data-lucide="qr-code" class="w-3.5 h-3.5"></i> 學生掃碼連線
+        </button>
+
+        <!-- 自訂新增情緒詞 -->
+        <button onclick="toggleAddCustomWordModal()" class="px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 rounded-lg text-xs font-medium flex items-center gap-1.5 transition">
+          <i data-lucide="plus-circle" class="w-3.5 h-3.5"></i> 新增情緒詞 (詞雲)
+        </button>
+
+        <!-- 右上角 教師登入按鈕 -->
+        <button id="btn-teacher-login" onclick="toggleLoginModal()" class="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold flex items-center gap-1.5 transition">
+          <i data-lucide="lock" class="w-3.5 h-3.5"></i> <span id="login-btn-text">教師登入</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 主內容呈現區 -->
+    <div class="p-4 md:p-6 flex-1 flex flex-col gap-6 max-w-6xl w-full mx-auto">
+
+      <!-- 問題/文本指示框 -->
+      <section class="bg-slate-950 border border-slate-800 rounded-2xl p-4 shadow-xl">
+        <div class="flex items-center justify-between mb-2">
+          <label class="text-xs font-semibold text-indigo-400 flex items-center gap-1.5">
+            <i data-lucide="message-square" class="w-3.5 h-3.5"></i> 當前閱讀問題 / 討論主題
+          </label>
+          <span id="question-mode-hint" class="text-[11px] text-slate-500">教師登入後可編輯問題內容</span>
+        </div>
+        <textarea id="question-input" rows="2" readonly
+          class="w-full bg-slate-900/90 border border-slate-800 rounded-xl p-3 text-sm md:text-base text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition resize-none readonly:opacity-80"
+          placeholder="請在此打上問題，例如：閱讀完文本第一段後，主角表現出哪種情緒？"
+          oninput="onQuestionChange()"></textarea>
+      </section>
+
+      <!-- Russell 情緒環狀模型 2D 互動地圖 -->
+      <section class="bg-slate-950 border border-slate-800 rounded-2xl p-4 md:p-6 shadow-2xl flex flex-col items-center justify-center relative overflow-hidden">
+        
+        <!-- 四象限動態背景標籤 -->
+        <div class="w-full flex justify-between items-center text-xs font-bold text-slate-500 mb-2 px-2 select-none">
+          <span class="text-slate-400">❶ 負面 • 高強度</span>
+          <span class="text-slate-400">❷ 正面 • 高強度</span>
+        </div>
+
+        <!-- 2D 座標盤容器 -->
+        <div id="map-container" class="relative w-full aspect-square max-w-[650px] bg-slate-900/60 rounded-full border-2 border-dashed border-slate-700/80 my-2 overflow-visible shadow-inner flex items-center justify-center">
+
+          <!-- 十字座標軸線 -->
+          <div class="absolute inset-0 pointer-events-none flex items-center justify-center">
+            <!-- 橫軸 (正面/負面) -->
+            <div class="absolute w-full h-[1.5px] bg-slate-700/80">
+              <span class="absolute left-3 -top-6 text-xs font-bold text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded border border-slate-700">負面 (Negative)</span>
+              <span class="absolute right-3 -top-6 text-xs font-bold text-slate-400 bg-slate-900/80 px-2 py-0.5 rounded border border-slate-700">正面 (Positive)</span>
+            </div>
+            <!-- 縱軸 (高/低強度，置於正中間) -->
+            <div class="absolute h-full w-[1.5px] bg-slate-700/80">
+              <span class="absolute -top-7 left-1/2 -translate-x-1/2 text-xs font-bold text-slate-300 bg-slate-900 px-2 py-0.5 rounded border border-slate-700 whitespace-nowrap z-10">高強度 (High arousal)</span>
+              <span class="absolute -bottom-7 left-1/2 -translate-x-1/2 text-xs font-bold text-slate-300 bg-slate-900 px-2 py-0.5 rounded border border-slate-700 whitespace-nowrap z-10">低強度 (Low arousal)</span>
+            </div>
+          </div>
+
+          <!-- 四個象限數字標示 -->
+          <span class="absolute top-[25%] left-[25%] text-4xl font-extrabold text-slate-800/40 select-none pointer-events-none">①</span>
+          <span class="absolute top-[25%] right-[25%] text-4xl font-extrabold text-slate-800/40 select-none pointer-events-none">②</span>
+          <span class="absolute bottom-[25%] left-[25%] text-4xl font-extrabold text-slate-800/40 select-none pointer-events-none">③</span>
+          <span class="absolute bottom-[25%] right-[25%] text-4xl font-extrabold text-slate-800/40 select-none pointer-events-none">④</span>
+
+          <!-- 情緒節點將由 JavaScript 動態渲染至此 -->
+          <div id="emotions-layer" class="absolute inset-0 w-full h-full"></div>
+
+        </div>
+
+        <div class="w-full flex justify-between items-center text-xs font-bold text-slate-500 mt-2 px-2 select-none">
+          <span class="text-slate-400">❸ 負面 • 低強度</span>
+          <span class="text-slate-400">❹ 正面 • 低強度</span>
+        </div>
+
+        <!-- 學生提示訊息 -->
+        <p id="student-instruction" class="mt-4 text-xs text-indigo-300 bg-indigo-950/60 border border-indigo-800/50 px-4 py-2 rounded-full flex items-center gap-2">
+          <i data-lucide="info" class="w-4 h-4 text-indigo-400"></i>
+          點擊情緒詞即可完成投票（<span class="font-bold text-amber-400">上限最多選擇 3 個主要情緒</span>）
+        </p>
+      </section>
+
+      <!-- 四大象限數據比例統計 (老師登入後顯示) -->
+      <section id="quadrant-stats" class="hidden grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl text-center">
+          <div class="text-xs text-slate-400 mb-1">① 高強度/負面</div>
+          <div id="q1-count" class="text-xl font-extrabold text-rose-400">0 票 (0%)</div>
+        </div>
+        <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl text-center">
+          <div class="text-xs text-slate-400 mb-1">❷ 高強度/正面</div>
+          <div id="q2-count" class="text-xl font-extrabold text-amber-400">0 票 (0%)</div>
+        </div>
+        <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl text-center">
+          <div class="text-xs text-slate-400 mb-1">❸ 低強度/負面</div>
+          <div id="q3-count" class="text-xl font-extrabold text-blue-400">0 票 (0%)</div>
+        </div>
+        <div class="bg-slate-950 border border-slate-800 p-3 rounded-xl text-center">
+          <div class="text-xs text-slate-400 mb-1">❹ 低強度/正面</div>
+          <div id="q4-count" class="text-xl font-extrabold text-emerald-400">0 票 (0%)</div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- 彈窗 0: 教師登入彈窗 -->
+  <div id="login-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-sm w-full space-y-4 shadow-2xl relative">
+      <button onclick="toggleLoginModal()" class="absolute top-3 right-3 text-slate-400 hover:text-white">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+      <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2">
+        <i data-lucide="lock" class="text-amber-400"></i> 教師身分驗證登入
+      </h3>
+      
+      <div class="space-y-3 pt-2">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">教師帳號：</label>
+          <input type="text" id="teacher-account-input" placeholder="請輸入帳號"
+            class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">登入密碼：</label>
+          <input type="password" id="teacher-password-input" placeholder="請輸入密碼"
+            class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500">
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="toggleLoginModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-300">取消</button>
+        <button onclick="handleTeacherLogin()" class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold">登入驗證</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 彈窗 1: QR Code 投影彈窗 -->
+  <div id="qrcode-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-sm w-full text-center space-y-4 shadow-2xl relative">
+      <button onclick="toggleQRCodeModal()" class="absolute top-3 right-3 text-slate-400 hover:text-white">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+      <h3 class="text-lg font-bold text-slate-100 flex items-center justify-center gap-2">
+        <i data-lucide="qr-code" class="text-indigo-400"></i> 學生手機掃碼連線
+      </h3>
+      <p class="text-xs text-slate-400">請學生使用手機相機掃描下方 QR Code 進入投票</p>
+      
+      <div class="bg-white p-4 rounded-xl inline-block mx-auto shadow-inner">
+        <div id="qrcode-target"></div>
+      </div>
+
+      <div class="text-xs text-slate-400 break-all bg-slate-950 p-2 rounded border border-slate-800">
+        <span id="share-url-text">http://localhost</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 彈窗 2: 學生自訂情緒詞雲彈窗 -->
+  <div id="custom-word-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-md w-full space-y-4 shadow-2xl relative">
+      <button onclick="toggleAddCustomWordModal()" class="absolute top-3 right-3 text-slate-400 hover:text-white">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+      <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2">
+        <i data-lucide="plus-circle" class="text-indigo-400"></i> 新增自訂情緒詞彙 (詞雲)
+      </h3>
+      <p class="text-xs text-slate-400">找不到你想表達的情緒？輸入新詞彙並指定它的象限感受！</p>
+      
+      <div class="space-y-3 pt-2">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">情緒詞名稱：</label>
+          <input type="text" id="new-word-title" placeholder="例如：驚喜、心酸、小確幸..." maxlength="6"
+            class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-100 focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">正面 / 負面 (好壞感受)：</label>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-400">負面</span>
+            <input type="range" id="new-word-x" min="-85" max="85" value="0" class="w-full accent-indigo-500">
+            <span class="text-xs text-slate-400">正面</span>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">高強度 / 低強度 (激動平靜)：</label>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-slate-400">低強度</span>
+            <input type="range" id="new-word-y" min="-85" max="85" value="0" class="w-full accent-indigo-500">
+            <span class="text-xs text-slate-400">高強度</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-2 pt-2">
+        <button onclick="toggleAddCustomWordModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-300">取消</button>
+        <button onclick="submitCustomWord()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold">新增並選擇</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 邏輯腳本 -->
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
+    import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+    import { getFirestore, doc, onSnapshot, setDoc } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+const firebaseConfig = {
+  apiKey: "AIzaSyASA87Ds7zo7h4y8z56TwJp8wqRkhAmTjs",
+  authDomain: "tool-emomap.firebaseapp.com",
+  projectId: "tool-emomap",
+  storageBucket: "tool-emomap.firebasestorage.app",
+  messagingSenderId: "269372513196",
+  appId: "1:269372513196:web:8ba3da9684fa4296c83809"
+};
+
+    // 1. 預設全地圖情緒詞資料
+    const DEFAULT_EMOTIONS = [
+      // 象限 1 (高強度 - 負面)
+      { id: '驚恐', name: '驚恐', x: -18, y: 78, quadrant: 1 },
+      { id: '緊張', name: '緊張', x: -15, y: 64, quadrant: 1 },
+      { id: '害怕', name: '害怕', x: -35, y: 58, quadrant: 1 },
+      { id: '悲痛', name: '悲痛', x: -55, y: 46, quadrant: 1 },
+      { id: '苦惱', name: '苦惱', x: -38, y: 44, quadrant: 1 },
+      { id: '憤怒', name: '憤怒', x: -18, y: 42, quadrant: 1 },
+      { id: '失望', name: '失望', x: -50, y: 28, quadrant: 1 },
+
+      // 象限 2 (高強度 - 正面)
+      { id: '激動', name: '激動', x: 16, y: 72, quadrant: 2 },
+      { id: '驚奇', name: '驚奇', x: 30, y: 68, quadrant: 2 },
+      { id: '興奮', name: '興奮', x: 42, y: 62, quadrant: 2 },
+      { id: '快樂', name: '快樂', x: 50, y: 32, quadrant: 2 },
+
+      // 象限 3 (低強度 - 負面)
+      { id: '極度悲傷', name: '極度悲傷', x: -55, y: -8, quadrant: 3 },
+      { id: '憂鬱', name: '憂鬱', x: -75, y: -28, quadrant: 3 },
+      { id: '傷心', name: '傷心', x: -48, y: -20, quadrant: 3 },
+      { id: '消沉', name: '消沉', x: -48, y: -32, quadrant: 3 },
+      { id: '厭煩', name: '厭煩', x: -32, y: -45, quadrant: 3 },
+      { id: '頹喪', name: '頹喪', x: -50, y: -65, quadrant: 3 },
+      { id: '疲乏', name: '疲乏', x: -32, y: -72, quadrant: 3 },
+
+      // 象限 4 (低強度 - 正面)
+      { id: '愉快', name: '愉快', x: 58, y: 15, quadrant: 4 },
+      { id: '歡喜', name: '歡喜', x: 52, y: -8, quadrant: 4 },
+      { id: '高興', name: '高興', x: 52, y: -18, quadrant: 4 },
+      { id: '安逸', name: '安逸', x: 62, y: -42, quadrant: 4 },
+      { id: '滿足', name: '滿足', x: 60, y: -52, quadrant: 4 },
+      { id: '輕鬆', name: '輕鬆', x: 48, y: -58, quadrant: 4 },
+      { id: '悠閒', name: '悠閒', x: 58, y: -62, quadrant: 4 },
+      { id: '寧靜', name: '寧靜', x: 42, y: -75, quadrant: 4 },
+      { id: '滿意', name: '滿意', x: 55, y: -72, quadrant: 4 },
+      { id: '困倦', name: '困倦', x: 12, y: -72, quadrant: 4 }
+    ];
+
+    // 全域狀態
+    window.appState = {
+      isTeacherLoggedIn: false,
+      question: '閱讀完文本後，你感受到什麼情緒？',
+      votes: {}, 
+      customWords: [], 
+      myVotes: new Set()
+    };
+
+    // 初始化預設票數
+    DEFAULT_EMOTIONS.forEach(e => { window.appState.votes[e.id] = 0; });
+
+    let db = null;
+    let roomDocRef = null;
+    const DRIVE_FOLDER_ID = '1oI4GPpRotu2UwwD1TZ6NE51lA8LZkXFW';
+
+    window.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      initFirebase();
+      renderMap();
+      setupUI();
+
+      // 產生 QR Code
+      const shareUrl = window.location.href;
+      document.getElementById('share-url-text').innerText = shareUrl;
+      new QRCode(document.getElementById("qrcode-target"), {
+        text: shareUrl,
+        width: 180,
+        height: 180,
+        colorDark : "#0f172a",
+        colorLight : "#ffffff"
+      });
+    });
+
+    async function initFirebase() {
+      try {
+        if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+          const firebaseConfig = JSON.parse(__firebase_config);
+          const app = initializeApp(firebaseConfig);
+          const auth = getAuth(app);
+          db = getFirestore(app);
+
+          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+            await signInWithCustomToken(auth, __initial_auth_token);
+          } else {
+            await signInAnonymously(auth);
+          }
+
+          const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-emotion-app';
+          roomDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'session_room');
+
+          onSnapshot(roomDocRef, (snapshot) => {
+            if (snapshot.exists()) {
+              const data = snapshot.data();
+              if (data.question !== undefined) window.appState.question = data.question;
+              if (data.votes !== undefined) window.appState.votes = data.votes;
+              if (data.customWords !== undefined) window.appState.customWords = data.customWords;
+              
+              document.getElementById('question-input').value = window.appState.question;
+              renderMap();
+              updateStats();
+            } else {
+              syncToFirebase();
+            }
+          }, (err) => console.error("Firebase 監聽失敗:", err));
+
+          document.getElementById('sync-status-badge').innerHTML = `
+            <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> 雲端即時連線中
+          `;
+          document.getElementById('sync-status-badge').className = "flex items-center gap-1.5 text-emerald-400";
+        }
+      } catch (e) {
+        console.warn("無法連接 Firebase，使用 Memory 模式", e);
+      }
+    }
+
+    function syncToFirebase() {
+      if (!roomDocRef) return;
+      setDoc(roomDocRef, {
+        question: window.appState.question,
+        votes: window.appState.votes,
+        customWords: window.appState.customWords,
+        updatedAt: new Date().toISOString()
+      }, { merge: true }).catch(err => console.error(err));
+    }
+
+    // 渲染互動地圖
+    window.renderMap = function() {
+      const layer = document.getElementById('emotions-layer');
+      layer.innerHTML = '';
+
+      const allWords = [...DEFAULT_EMOTIONS, ...window.appState.customWords];
+      let maxVote = 1;
+      Object.values(window.appState.votes).forEach(v => { if (v > maxVote) maxVote = v; });
+
+      allWords.forEach(word => {
+        const votesCount = window.appState.votes[word.id] || 0;
+        const isVotedByMe = window.appState.myVotes.has(word.id);
+
+        const leftPercent = 50 + (word.x * 0.42);
+        const topPercent = 50 - (word.y * 0.42);
+        const intensityRatio = votesCount > 0 ? (votesCount / maxVote) : 0;
+
+        const node = document.createElement('div');
+        node.className = `emotion-node absolute transform -translate-x-1/2 -translate-y-1/2 flex items-center gap-1.5 px-2.5 py-1 rounded-full cursor-pointer border transition-all ${
+          votesCount > 0 
+            ? 'bg-rose-500/90 text-white border-rose-300 font-bold heat-glow z-20 scale-105' 
+            : isVotedByMe
+              ? 'bg-indigo-600/80 text-white border-indigo-400 font-semibold z-10'
+              : 'bg-slate-900/50 text-slate-300/80 border-slate-700/60 hover:border-slate-400 hover:text-white hover:bg-slate-800'
+        }`;
+
+        node.style.left = `${leftPercent}%`;
+        node.style.top = `${topPercent}%`;
+        
+        if (votesCount > 0) {
+          node.style.backgroundColor = `rgba(225, 29, 72, ${0.4 + intensityRatio * 0.55})`;
+        }
+
+        node.innerHTML = `
+          <span class="text-xs md:text-sm whitespace-nowrap">${word.name}</span>
+          ${votesCount > 0 ? `<span class="bg-white/20 px-1.5 py-0.2 rounded-full text-[10px] font-mono">${votesCount}</span>` : ''}
+        `;
+
+        node.onclick = () => handleVote(word.id);
+        layer.appendChild(node);
+      });
+    };
+
+    // 處理點擊投票 (上限限制 3 個)
+    function handleVote(wordId) {
+      if (window.appState.myVotes.has(wordId)) {
+        // 取消投票
+        window.appState.myVotes.delete(wordId);
+        window.appState.votes[wordId] = Math.max(0, (window.appState.votes[wordId] || 1) - 1);
+      } else {
+        // 檢查上限 3 個情緒
+        if (window.appState.myVotes.size >= 3) {
+          alert("最多只能選擇 3 個最主要的情緒喔！\n如需重新選擇，請先點擊已選的情緒進行取消。");
+          return;
+        }
+        // 進行投票
+        window.appState.myVotes.add(wordId);
+        window.appState.votes[wordId] = (window.appState.votes[wordId] || 0) + 1;
+      }
+
+      renderMap();
+      updateStats();
+      syncToFirebase();
+    }
+
+    // 更新象限統計
+    function updateStats() {
+      const allWords = [...DEFAULT_EMOTIONS, ...window.appState.customWords];
+      const totals = { 1: 0, 2: 0, 3: 0, 4: 0, total: 0 };
+
+      allWords.forEach(w => {
+        const count = window.appState.votes[w.id] || 0;
+        totals[w.quadrant] += count;
+        totals.total += count;
+      });
+
+      for (let q = 1; q <= 4; q++) {
+        const pct = totals.total > 0 ? Math.round((totals[q] / totals.total) * 100) : 0;
+        const el = document.getElementById(`q${q}-count`);
+        if (el) el.innerText = `${totals[q]} 票 (${pct}%)`;
+      }
+    }
+
+    // 教師登入彈窗控制
+    window.toggleLoginModal = function() {
+      if (window.appState.isTeacherLoggedIn) {
+        // 已登入則執行登出
+        if (confirm("確定要登出教師模式嗎？")) {
+          window.appState.isTeacherLoggedIn = false;
+          applyTeacherState();
+        }
+        return;
+      }
+      const modal = document.getElementById('login-modal');
+      modal.classList.toggle('hidden');
+    };
+
+    // 教師登入驗證 (帳號 t5111 / 密碼 24567126)
+    window.handleTeacherLogin = function() {
+      const acc = document.getElementById('teacher-account-input').value.trim();
+      const pwd = document.getElementById('teacher-password-input').value.trim();
+
+      if (acc === 't5111' && pwd === '24567126') {
+        window.appState.isTeacherLoggedIn = true;
+        document.getElementById('teacher-account-input').value = '';
+        document.getElementById('teacher-password-input').value = '';
+        toggleLoginModal();
+        applyTeacherState();
+        alert("登入成功！已解鎖教師管理權限。");
+      } else {
+        alert("帳號或密碼錯誤，請重新輸入！");
+      }
+    };
+
+    // 套用教師登入狀態
+    function applyTeacherState() {
+      const isTeacher = window.appState.isTeacherLoggedIn;
+      const tControls = document.getElementById('teacher-controls');
+      const qStats = document.getElementById('quadrant-stats');
+      const qInput = document.getElementById('question-input');
+      const qHint = document.getElementById('question-mode-hint');
+      const btnText = document.getElementById('login-btn-text');
+
+      if (isTeacher) {
+        tControls.classList.remove('hidden');
+        qStats.classList.remove('hidden');
+        qInput.removeAttribute('readonly');
+        qHint.innerText = "老師可編輯內文問題 (已同步學生端)";
+        btnText.innerText = "已登入 (點擊登出)";
+      } else {
+        tControls.classList.add('hidden');
+        qStats.classList.add('hidden');
+        qInput.setAttribute('readonly', 'true');
+        qHint.innerText = "教師登入後可編輯問題內容";
+        btnText.innerText = "教師登入";
+      }
+    }
+
+    // 題目變更 (僅教師模式有效)
+    window.onQuestionChange = function() {
+      if (!window.appState.isTeacherLoggedIn) return;
+      window.appState.question = document.getElementById('question-input').value;
+      syncToFirebase();
+    };
+
+    // 重置所有投票
+    window.resetVotes = function() {
+      if (!confirm("確定要重置所有學生的情緒投票數據嗎？")) return;
+      Object.keys(window.appState.votes).forEach(k => { window.appState.votes[k] = 0; });
+      window.appState.myVotes.clear();
+      renderMap();
+      updateStats();
+      syncToFirebase();
+    };
+
+    // 彈窗控制
+    window.toggleQRCodeModal = function() {
+      document.getElementById('qrcode-modal').classList.toggle('hidden');
+    };
+
+    window.toggleAddCustomWordModal = function() {
+      document.getElementById('custom-word-modal').classList.toggle('hidden');
+    };
+
+    // 提交學生自訂情緒詞
+    window.submitCustomWord = function() {
+      const title = document.getElementById('new-word-title').value.trim();
+      const x = parseInt(document.getElementById('new-word-x').value);
+      const y = parseInt(document.getElementById('new-word-y').value);
+
+      if (!title) {
+        alert("請輸入情緒詞名稱！");
+        return;
+      }
+
+      let quadrant = 1;
+      if (x >= 0 && y >= 0) quadrant = 2;
+      else if (x < 0 && y >= 0) quadrant = 1;
+      else if (x < 0 && y < 0) quadrant = 3;
+      else quadrant = 4;
+
+      const newWord = {
+        id: `custom_${Date.now()}`,
+        name: title,
+        x: x,
+        y: y,
+        quadrant: quadrant
+      };
+
+      window.appState.customWords.push(newWord);
+      
+      // 檢查投票限制
+      if (window.appState.myVotes.size < 3) {
+        window.appState.votes[newWord.id] = 1;
+        window.appState.myVotes.add(newWord.id);
+      } else {
+        window.appState.votes[newWord.id] = 0;
+        alert("新增成功！注意：您目前的選擇已達 3 個上限，故此新詞暫未自動計入您的投票。");
+      }
+
+      document.getElementById('new-word-title').value = '';
+      toggleAddCustomWordModal();
+      
+      renderMap();
+      updateStats();
+      syncToFirebase();
+    };
+
+    // 匯出/同步到 Google Drive 備份格式導出
+    window.exportToDrive = function() {
+      const allWords = [...DEFAULT_EMOTIONS, ...window.appState.customWords];
+      let csvContent = "data:text/csv;charset=utf-8,\uFEFF";
+      csvContent += `討論主題,"${window.appState.question.replace(/"/g, '""')}"\n`;
+      csvContent += `匯出時間,"${new Date().toLocaleString()}"\n`;
+      csvContent += `指定 Google Drive 資料夾 ID,"${DRIVE_FOLDER_ID}"\n\n`;
+      csvContent += "情緒詞,象限,X座標,Y座標,得票數\n";
+
+      allWords.forEach(w => {
+        const count = window.appState.votes[w.id] || 0;
+        csvContent += `"${w.name}",象限${w.quadrant},${w.x},${w.y},${count}\n`;
+      });
+
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `情緒地圖投票紀錄_${new Date().toISOString().slice(0,10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+
+      alert(`已將投票統計資料匯出為 CSV 檔案！\n可直接上傳至您的指定 Google Drive 資料夾：\n${DRIVE_FOLDER_ID}`);
+    };
+
+    function setupUI() {
+      document.getElementById('question-input').value = window.appState.question;
+      updateStats();
+    }
+  </script>
+</body>
+</html>
