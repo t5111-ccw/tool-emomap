@@ -232,7 +232,7 @@
   <!-- 彈窗 0: 教師登入彈窗 -->
   <div id="login-modal" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
     <div class="bg-slate-900 border border-slate-700 p-6 rounded-2xl max-w-sm w-full space-y-4 shadow-2xl relative">
-      <button onclick="toggleLoginModal()" class="absolute top-3 right-3 text-slate-400 hover:text-white">
+      <button onclick="closeLoginModalWindow()" class="absolute top-3 right-3 text-slate-400 hover:text-white">
         <i data-lucide="x" class="w-5 h-5"></i>
       </button>
       <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2">
@@ -241,19 +241,15 @@
       
       <div class="space-y-3 pt-2">
         <div>
-          <label class="block text-xs font-semibold text-slate-300 mb-1">教師帳號：</label>
-          <input type="text" id="teacher-account-input" placeholder="請輸入帳號"
-            class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500">
-        </div>
-        <div>
           <label class="block text-xs font-semibold text-slate-300 mb-1">登入密碼：</label>
           <input type="password" id="teacher-password-input" placeholder="請輸入密碼"
-            class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500">
+            class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500"
+            onkeydown="if(event.key === 'Enter') handleTeacherLogin()">
         </div>
       </div>
 
       <div class="flex justify-end gap-2 pt-2">
-        <button onclick="toggleLoginModal()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-300">取消</button>
+        <button onclick="closeLoginModalWindow()" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs text-slate-300">取消</button>
         <button onclick="handleTeacherLogin()" class="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold">登入驗證</button>
       </div>
     </div>
@@ -329,14 +325,6 @@
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
     import { getAuth, signInAnonymously } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
     import { getFirestore, doc, onSnapshot, setDoc } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
-const firebaseConfig = {
-  apiKey: "AIzaSyASA87Ds7zo7h4y8z56TwJp8wqRkhAmTjs",
-  authDomain: "tool-emomap.firebaseapp.com",
-  projectId: "tool-emomap",
-  storageBucket: "tool-emomap.firebasestorage.app",
-  messagingSenderId: "269372513196",
-  appId: "1:269372513196:web:8ba3da9684fa4296c83809"
-};
 
     // 1. 預設全地圖情緒詞資料
     const DEFAULT_EMOTIONS = [
@@ -413,41 +401,47 @@ const firebaseConfig = {
 
     async function initFirebase() {
       try {
-        if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-          const firebaseConfig = JSON.parse(__firebase_config);
-          const app = initializeApp(firebaseConfig);
-          const auth = getAuth(app);
-          db = getFirestore(app);
+        const firebaseConfig = {
+          apiKey: "AIzaSyASA87Ds7zo7h4y8z56TwJp8wqRkhAmTjs",
+          authDomain: "tool-emomap.firebaseapp.com",
+          projectId: "tool-emomap",
+          storageBucket: "tool-emomap.firebasestorage.app",
+          messagingSenderId: "269372513196",
+          appId: "1:269372513196:web:8ba3da9684fa4296c83809"
+        };
 
-          if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-            await signInWithCustomToken(auth, __initial_auth_token);
-          } else {
-            await signInAnonymously(auth);
-          }
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        db = getFirestore(app);
 
-          const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-emotion-app';
-          roomDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'session_room');
-
-          onSnapshot(roomDocRef, (snapshot) => {
-            if (snapshot.exists()) {
-              const data = snapshot.data();
-              if (data.question !== undefined) window.appState.question = data.question;
-              if (data.votes !== undefined) window.appState.votes = data.votes;
-              if (data.customWords !== undefined) window.appState.customWords = data.customWords;
-              
-              document.getElementById('question-input').value = window.appState.question;
-              renderMap();
-              updateStats();
-            } else {
-              syncToFirebase();
-            }
-          }, (err) => console.error("Firebase 監聽失敗:", err));
-
-          document.getElementById('sync-status-badge').innerHTML = `
-            <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> 雲端即時連線中
-          `;
-          document.getElementById('sync-status-badge').className = "flex items-center gap-1.5 text-emerald-400";
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInAnonymously(auth);
+        } else {
+          await signInAnonymously(auth);
         }
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'tool-emomap-room-1';
+        roomDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'session_room');
+
+        onSnapshot(roomDocRef, (snapshot) => {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
+            if (data.question !== undefined) window.appState.question = data.question;
+            if (data.votes !== undefined) window.appState.votes = data.votes;
+            if (data.customWords !== undefined) window.appState.customWords = data.customWords;
+            
+            document.getElementById('question-input').value = window.appState.question;
+            renderMap();
+            updateStats();
+          } else {
+            syncToFirebase();
+          }
+        }, (err) => console.error("Firebase 監聽失敗:", err));
+
+        document.getElementById('sync-status-badge').innerHTML = `
+          <span class="w-2 h-2 rounded-full bg-emerald-400 inline-block"></span> 雲端即時連線中
+        `;
+        document.getElementById('sync-status-badge').className = "flex items-center gap-1.5 text-emerald-400";
       } catch (e) {
         console.warn("無法連接 Firebase，使用 Memory 模式", e);
       }
@@ -546,18 +540,44 @@ const firebaseConfig = {
       }
     }
 
-    // 教師登入彈窗控制
+    // 教師按鈕點擊處理
     window.toggleLoginModal = function() {
       if (window.appState.isTeacherLoggedIn) {
-        // 已登入則執行登出
-        if (confirm("確定要登出教師模式嗎？")) {
-          window.appState.isTeacherLoggedIn = false;
-          applyTeacherState();
-        }
-        return;
+        // 已登入狀態下點擊直接登出
+        window.appState.isTeacherLoggedIn = false;
+        applyTeacherState();
+      } else {
+        // 未登入狀態下點擊，開啟登入彈窗
+        document.getElementById('login-modal').classList.remove('hidden');
       }
-      const modal = document.getElementById('login-modal');
-      modal.classList.toggle('hidden');
+    };
+
+    // 僅用於關閉彈窗
+    window.closeLoginModalWindow = function() {
+      document.getElementById('login-modal').classList.add('hidden');
+    };
+
+    // 教師登入驗證 (僅需密碼 24567126)
+    window.handleTeacherLogin = function() {
+      const pwd = document.getElementById('teacher-password-input').value.trim();
+
+      if (pwd === '24567126') {
+        window.appState.isTeacherLoggedIn = true;
+        document.getElementById('teacher-password-input').value = '';
+        
+        closeLoginModalWindow();
+        applyTeacherState();
+      } else {
+        const inputEl = document.getElementById('teacher-password-input');
+        inputEl.value = '';
+        inputEl.placeholder = '密碼錯誤，請重新輸入！';
+        inputEl.classList.add('border-rose-500');
+      }
+    };
+
+    // 僅用於關閉彈窗
+    window.closeLoginModalWindow = function() {
+      document.getElementById('login-modal').classList.add('hidden');
     };
 
     // 教師登入驗證 (帳號 t5111 / 密碼 24567126)
@@ -569,7 +589,9 @@ const firebaseConfig = {
         window.appState.isTeacherLoggedIn = true;
         document.getElementById('teacher-account-input').value = '';
         document.getElementById('teacher-password-input').value = '';
-        toggleLoginModal();
+        
+        // 修正：直接隱藏彈窗，不呼叫會觸發登出確認的 toggleLoginModal
+        closeLoginModalWindow();
         applyTeacherState();
         alert("登入成功！已解鎖教師管理權限。");
       } else {
